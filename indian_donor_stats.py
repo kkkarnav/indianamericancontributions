@@ -24,6 +24,7 @@ Usage:
       --indivs22  indivs22.txt [--train_model] [--model_path path]
 """
 import argparse, os, time
+import numpy as np
 import pandas as pd, joblib
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import CountVectorizer
@@ -33,6 +34,9 @@ from sklearn.pipeline import make_pipeline
 from sklearn.metrics import precision_recall_fscore_support
 from tqdm.auto import tqdm
 import polars as pl
+from collections import defaultdict
+import pickle
+from ethnicseer import EthnicClassifier
 
 # ---- Argument parsing ----
 def parse_args():
@@ -91,6 +95,10 @@ def process_file(path, clf, do_detailed_summary=False):
             schema_overrides={'name': pl.Utf8},
             ignore_errors=True
         )
+        .filter(
+            pl.col("contrib_id").is_not_null()
+            & pl.col("contrib_id").str.strip_chars().ne("")
+        )
         .select(['name'])
         .with_columns(pl.col('name').str.to_uppercase().str.strip_chars())
         .unique()
@@ -100,7 +108,31 @@ def process_file(path, clf, do_detailed_summary=False):
     
     # Batch predict on unique names (much faster)
     names_list = unique_names_df['name'].drop_nulls().to_list()
-    is_indian_predictions = [bool(pred) for pred in clf.predict(names_list)]
+    
+    df = pd.read_csv("./data/wiki_name_race.csv")
+    df["ethnic"] = df["race"].apply(lambda x: x.split(",")[-1])
+    df["ethnic"] = df["ethnic"].apply(lambda x: "ind" if x == "IndianSubContinent" else "not")
+    df["name"] = df['name_first'].str.cat(df[['name_middle', 'name_last', 'name_suffix']], sep=' ', na_rep='')
+    df = df[["name", "ethnic"]]
+    df = df.dropna()
+    
+    stats = build_name_stats(df, "name", "ethnic")
+    X = []
+    for name in names_list:
+        features = create_features(name, stats)
+        X.append(list(features.values()))
+    X_new = np.array(list(X))
+    
+    y_probs = clf.predict_proba(X_new)[:, 1]
+    y_pred_adjusted = (y_probs <= 0.01).astype(int)
+    print(pd.Series(y_pred_adjusted).value_counts())
+    is_indian_predictions = [bool(pred) for pred in y_pred_adjusted]
+    
+    pred_df = pd.DataFrame({
+        "name": names_list,
+        "probs": y_probs
+    })
+    pred_df.to_csv("./output/indiv20_wiki_probs.csv", index=False)
     
     # Create a lookup dataframe
     name_lookup = pl.DataFrame({
@@ -255,6 +287,143 @@ def process_file(path, clf, do_detailed_summary=False):
         
     return stats
 
+
+def preprocess_name(name):
+    parts = str(name).strip().split()
+    first_name = parts[0].lower() if len(parts) > 0 else ""
+    last_name = parts[-1].lower() if len(parts) > 1 else ""
+    
+    f4_first = first_name[:4] if len(first_name) >= 4 else first_name
+    l4_first = first_name[-4:] if len(first_name) >= 4 else first_name
+    f4_last = last_name[:4] if len(last_name) >= 4 else last_name
+    l4_last = last_name[-4:] if len(last_name) >= 4 else last_name
+    
+    n_sub_names = len(parts)
+    has_dash = any('-' in part for part in parts)
+    
+    return {
+        'first_name': first_name,
+        'last_name': last_name,
+        'f4_first': f4_first,
+        'l4_first': l4_first,
+        'f4_last': f4_last,
+        'l4_last': l4_last,
+        'n_sub_names': min(n_sub_names, 4),
+        'has_dash': int(has_dash)
+    }
+
+
+def build_name_stats(df, name_col='name', ethnicity_col='ethnic'):
+    first_name_stats = defaultdict(lambda: defaultdict(int))
+    last_name_stats = defaultdict(lambda: defaultdict(int))
+    f4_first_stats = defaultdict(lambda: defaultdict(int))
+    l4_first_stats = defaultdict(lambda: defaultdict(int))
+    f4_last_stats = defaultdict(lambda: defaultdict(int))
+    l4_last_stats = defaultdict(lambda: defaultdict(int))
+    
+    for _, row in df.iterrows():
+        name_info = preprocess_name(row[name_col])
+        ethnicity = row[ethnicity_col]
+        
+        first_name_stats[name_info['first_name']][ethnicity] += 1
+        last_name_stats[name_info['last_name']][ethnicity] += 1
+        f4_first_stats[name_info['f4_first']][ethnicity] += 1
+        l4_first_stats[name_info['l4_first']][ethnicity] += 1
+        f4_last_stats[name_info['f4_last']][ethnicity] += 1
+        l4_last_stats[name_info['l4_last']][ethnicity] += 1
+    
+    return {
+        'first_name_stats': first_name_stats,
+        'last_name_stats': last_name_stats,
+        'f4_first_stats': f4_first_stats,
+        'l4_first_stats': l4_first_stats,
+        'f4_last_stats': f4_last_stats,
+        'l4_last_stats': l4_last_stats
+    }
+
+
+def create_features(name, stats, cats=['ind', 'not']):
+    name_info = preprocess_name(name)
+    features = {}
+    
+    for eth in cats:
+        fn_counts = stats['first_name_stats'][name_info['first_name']]
+        total_fn = sum(fn_counts.values())
+        features[f'probability_{eth}_first_name'] = fn_counts.get(eth, 0) / (total_fn + 1)
+        
+        ln_counts = stats['last_name_stats'][name_info['last_name']]
+        total_ln = sum(ln_counts.values())
+        features[f'probability_{eth}_last_name'] = ln_counts.get(eth, 0) / (total_ln + 1)
+        
+        f4f_counts = stats['f4_first_stats'][name_info['f4_first']]
+        total_f4f = sum(f4f_counts.values())
+        features[f'probability_{eth}_first_name_f4'] = f4f_counts.get(eth, 0) / (total_f4f + 1)
+        
+        l4f_counts = stats['l4_first_stats'][name_info['l4_first']]
+        total_l4f = sum(l4f_counts.values())
+        features[f'probability_{eth}_first_name_l4'] = l4f_counts.get(eth, 0) / (total_l4f + 1)
+        
+        f4l_counts = stats['f4_last_stats'][name_info['f4_last']]
+        total_f4l = sum(f4l_counts.values())
+        features[f'probability_{eth}_last_name_f4'] = f4l_counts.get(eth, 0) / (total_f4l + 1)
+        
+        l4l_counts = stats['l4_last_stats'][name_info['l4_last']]
+        total_l4l = sum(l4l_counts.values())
+        features[f'probability_{eth}_last_name_l4'] = l4l_counts.get(eth, 0) / (total_l4l + 1)
+        
+        features[f'best_evidence_{eth}'] = max(
+            features[f'probability_{eth}_first_name'],
+            features[f'probability_{eth}_last_name']
+        )
+    
+    features['dash_indicator'] = name_info['has_dash']
+    features['n_sub_names'] = name_info['n_sub_names']
+    
+    return features
+
+
+def is_indistinguishable(name, stats, threshold=0.15):
+    
+    name_info = preprocess_name(name)
+    features = create_features(name, stats)
+    
+    cats = sorted(stats['first_name_stats'][name_info['first_name']].keys())
+    psi = {cat: features[f'probability_{cat}_first_name'] for cat in cats}
+    phi = {cat: features[f'probability_{cat}_last_name'] for cat in cats}
+    
+    indistinguishable_pairs = []
+    
+    for i, r1 in enumerate(cats):
+        for r2 in cats[i+1:]:
+            
+            condition1 = (abs(psi[r1] - psi[r2]) <= threshold and 
+                         abs(phi[r1] - phi[r2]) <= threshold)
+            
+            max_psi = max(psi.values())
+            max_phi = max(phi.values())
+            condition2 = (max_psi - min(psi[r1], psi[r2]) <= threshold and 
+                         max_phi - min(phi[r1], phi[r2]) <= threshold)
+            
+            if condition1 and condition2:
+                indistinguishable_pairs.append(f"{r1}-{r2}")
+    
+    return indistinguishable_pairs if indistinguishable_pairs else None
+
+
+def handle_indistinguishables(df, stats, name_col='name'):
+    
+    df['indistinguishable'] = None
+    
+    for idx, row in tqdm(df.iterrows(), total=len(df)):
+        name = row[name_col]
+        indistinguishable = is_indistinguishable(name, stats)
+        
+        if indistinguishable:
+            df.at[idx, 'indistinguishable'] = ','.join(indistinguishable)
+    
+    return df
+
+
 # ---- Main driver ----
 def main():
     args = parse_args()
@@ -262,15 +431,13 @@ def main():
         clf = train_classifier(args.names_csv, args.model_path)
     else:
         clf = load_classifier(args.model_path)
-        
-    exit(1)
 
     # Process 2020 data with detailed summary
     stats20 = process_file(args.indivs20, clf, do_detailed_summary=True)
     
     # Process 2022 data (commented out for now)
-    stats22 = process_file(args.indivs22, clf, do_detailed_summary=True)
-    df = pd.DataFrame([stats20, stats22]).set_index('cycle')
+    # stats22 = process_file(args.indivs22, clf, do_detailed_summary=True)
+    df = pd.DataFrame([stats20]).set_index('cycle')
     
     print("\nComparison:")
     print(df.to_markdown(floatfmt='.2f'))
