@@ -133,6 +133,37 @@ if args.task == "donors_state":
     print(donors_state.head(10))
 
 
+if args.task == "donors_candidates":
+    
+    print("Aggregating donors with candidate info...")
+    
+    donors_recip = (
+        lf.group_by(["contrib_id", "recip_id"])
+        .agg(
+            pl.col("name").mode().first().alias("name"),
+            pl.col("name_new").mode().first().alias("name_new"),
+            pl.col("realcode").mode().first().alias("realcode"),
+            pl.col("gender").mode().first().alias("gender"),
+            pl.col("occupation").mode().first().alias("occupation"),
+            pl.col("employer").mode().first().alias("employer"),
+            pl.col("city").mode().first().alias("city"),
+            pl.col("state").mode().first().alias("state"),
+            pl.col("amount").sum().alias("total_donated"),
+            pl.col("amount").count().alias("donation_count"),
+            pl.col("amount").mean().alias("avg_donation"),
+            pl.col("amount").median().alias("med_donation"),
+        )
+        .sort("total_donated", descending=True)
+        .collect(streaming=True)
+    )
+
+    donors_recip.write_csv(f"./data/CampaignFin{year}/donors_recip{year}.csv")
+    print(donors_recip.tail(10))
+
+    donors_recip[:10000].write_csv(f"./data/CampaignFin{year}/top_donors_recip{year}.csv")
+    print(donors_recip.head(10))
+
+
 if args.task == "state":
     
     print("Aggregating donors...")
