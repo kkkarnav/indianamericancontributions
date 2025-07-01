@@ -162,5 +162,4 @@ cython_debug/
 data/
 models/
 output/
-manual/
 images/
