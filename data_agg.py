@@ -23,11 +23,24 @@ args = parser.parse_args()
 os_csv = args.path
 year = os_csv.split(".")[-2][-2:]
 
+with open(os_csv, 'rb') as f:
+    f.seek(6270 - 200)
+    print(f.read(400).decode('utf-8', errors='replace'))
+
 
 # for 2016
 '''with open(os_csv, 'r', encoding='utf-8', errors='replace') as f:
     content = f.read()
     content = content.replace('|15| ', '|15 |')  # or whatever fix you're trying
+    
+temp_file = "temp_fixed.csv"
+with open(temp_file, 'w', encoding='utf-8') as f:
+    f.write(content)'''
+    
+# for 2014 and 2012
+'''with open(os_csv, 'r', encoding='utf-8', errors='replace') as f:
+    content = f.read()
+    content = content.replace('|| ', '| |')  # or whatever fix you're trying
     
 temp_file = "temp_fixed.csv"
 with open(temp_file, 'w', encoding='utf-8') as f:
