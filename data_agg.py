@@ -23,11 +23,6 @@ args = parser.parse_args()
 os_csv = args.path
 year = os_csv.split(".")[-2][-2:]
 
-with open(os_csv, 'rb') as f:
-    f.seek(6270 - 200)
-    print(f.read(400).decode('utf-8', errors='replace'))
-
-
 # for 2016
 '''with open(os_csv, 'r', encoding='utf-8', errors='replace') as f:
     content = f.read()
