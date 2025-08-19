@@ -27,7 +27,6 @@ year = os_csv.split(".")[-2][-2:]
 '''with open(os_csv, 'r', encoding='utf-8', errors='replace') as f:
     content = f.read()
     content = content.replace('|15| ', '|15 |')  # or whatever fix you're trying
-    
 temp_file = "temp_fixed.csv"
 with open(temp_file, 'w', encoding='utf-8') as f:
     f.write(content)'''
@@ -36,7 +35,6 @@ with open(temp_file, 'w', encoding='utf-8') as f:
 '''with open(os_csv, 'r', encoding='utf-8', errors='replace') as f:
     content = f.read()
     content = content.replace('|| ', '| |')  # or whatever fix you're trying
-    
 temp_file = "temp_fixed.csv"
 with open(temp_file, 'w', encoding='utf-8') as f:
     f.write(content)'''
@@ -57,11 +55,8 @@ lf = (
         .select(['contrib_id', 'name', 'recip_id', 'orgname', 'ultorg', 'realcode', 
                  'amount', 'street', 'city', 'state', 'zip', 'recipcode', 'type', 
                  'gender', 'occupation', 'employer'])
-        # remove blank donations
         .filter(~pl.col('amount').is_null())
-        # remove refunds
         .filter(pl.col('amount') > 0)
-        # create a lowercase name column in the usual format
         .with_columns([
             pl.col("name").str.split(",").list.get(-1)
                 .str.to_lowercase().str.strip_chars().alias("firstname"),
