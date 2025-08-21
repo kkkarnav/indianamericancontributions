@@ -150,9 +150,6 @@ def calculate_dem_ratio(df):
 donors_csv = args.path
 df = pd.read_csv(donors_csv)
 
-year = "00"
-cands, cmtes = read_csvs_to_merge(year)
-
 recip_df = pd.DataFrame()
 for year in tqdm(["00", "02", "04", "06", "08", 10, 12, 14, 16, 18, 20, 22]):
 
@@ -160,21 +157,23 @@ for year in tqdm(["00", "02", "04", "06", "08", 10, 12, 14, 16, 18, 20, 22]):
     yearly_recip_csv = f"./data/CampaignFin{year}/donors_recip{year}.csv"
     yearly_recip_df = pd.read_csv(yearly_recip_csv)
     
+    cands, cmtes = read_csvs_to_merge(year)
+    
     yearly_recip_df = yearly_recip_df.merge(yearly_df[['contrib_id', 'sector', 'cycle', 'indian', 'combined_ratio']], on='contrib_id', how='left')
     yearly_recip_df = yearly_recip_df.merge(cands, on='recip_id', how='left')
     yearly_recip_df = yearly_recip_df.merge(cmtes[
         ["cmte_id", "pac_short", "affiliate", "pac", "recip_id", "recipcode", "cand_id", "party"]], 
         left_on='recip_id', right_on="cmte_id", how='left', suffixes=[None, "_pac"]
-        ).drop_duplicates(subset=['contrib_id', 'recip_id', 'cmte_id'], keep='last')
+        ).drop_duplicates(subset=['contrib_id', 'recip_id', 'cmte_id', 'cycle'], keep='last')
 
     yearly_recip_df.loc[yearly_recip_df["pac"].notna(), "name_y"] = yearly_recip_df.loc[yearly_recip_df["pac"].notna(), "pac"]
     yearly_recip_df.loc[yearly_recip_df["pac_short"].notna(), "name_y"] = yearly_recip_df.loc[yearly_recip_df["pac_short"].notna(), "pac_short"]
     yearly_recip_df.loc[yearly_recip_df["pac_short"].notna(), "party"] = yearly_recip_df.loc[yearly_recip_df["pac_short"].notna(), "party_pac"]
-    yearly_recip_df["party"] = yearly_recip_df["name_y"].map(pac_party_mapping)
     
     yearly_recip_df["recip_is_pac"] = False
     yearly_recip_df.loc[yearly_recip_df["pac_short"].notna(), "recip_is_pac"] = True
     
+    yearly_recip_df.loc[yearly_recip_df["recip_is_pac"] == True, "party"] = yearly_recip_df.loc[yearly_recip_df["recip_is_pac"] == True, "name_y"].map(pac_party_mapping)
     yearly_recip_df = calculate_dem_ratio(yearly_recip_df)
     yearly_recip_df["level"] = yearly_recip_df.apply(lambda x: "Senate" if "S1" == str(x["seat"]) or "S2" == str(x["seat"]) else 
                                            "President" if str(x["seat"]) == "PRES" else 
