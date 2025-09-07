@@ -16,7 +16,7 @@ tqdm.pandas()
 warnings.filterwarnings("ignore")
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-p", "--path", help="Path to the compiled yearly dfs csv", type=str, default="./output/donors_agg_pred_lastname.csv")
+parser.add_argument("-p", "--path", help="Path to the compiled yearly dfs csv", type=str, default="./output/donors_agg_pred_lastname_trunc_manual.csv")
 parser.add_argument("-t", "--task", help="Task to run/generate", type=str, default="trunc")
 args = parser.parse_args()
 
